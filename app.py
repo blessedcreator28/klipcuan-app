@@ -63,53 +63,92 @@ CONCEPTS = {
 
 CONCEPT_BRIEF = {
     "minimalist": (
-        "Tenang, elegan, kalem. Bahasa halus dan meyakinkan, seperti rekomendasi "
-        "teman yang selera-nya bagus. Hindari huruf kapital berlebihan dan kata alay."
+        "Tenang, elegan, kalem. Nada seperti teman yang seleranya bagus lagi merekomendasikan "
+        "temuan bagus. Hindari kapital berlebihan dan kata alay."
     ),
     "flashy": (
-        "Hype, kejut, cepat. Gaya 'racun Shopee' — heboh tapi tetap masuk akal. "
-        "Boleh pakai kata seperti gila, parah, buruan, tapi jangan lebay sampai norak."
+        "Hype dan kejut ala racun Shopee. Boleh pakai kata gila, parah, buruan, gak nyangka. "
+        "Heboh tapi tetap masuk akal, jangan sampai norak."
     ),
     "phone": (
-        "POV / curhat personal, seolah lagi ngomong ke kamera sambil pegang HP. "
-        "Kesannya pengalaman pribadi, bukan iklan."
+        "POV personal, seolah lagi ngomong ke kamera sambil pegang HP. Kesannya pengalaman "
+        "pribadi setelah checkout, bukan iklan."
     ),
 }
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 1. NASKAH (LLM)
+# 1. NASKAH (LLM) — Affiliate-first
 # ──────────────────────────────────────────────────────────────────────────────
 
-SCRIPT_SYSTEM = """Kamu adalah copywriter video affiliate Indonesia yang jago bikin konten faceless viral di TikTok/Reels.
+# Model default per Agustus 2026. Jangan dihardcode di tempat lain —
+# daftar model ditarik live lewat list_models() supaya tidak mati saat provider
+# men-decommission model (seluruh keluarga Llama sudah dicabut dari GroqCloud).
+DEFAULT_MODELS = {"Groq": "openai/gpt-oss-120b", "Gemini": "gemini-2.5-flash"}
 
-Tugasmu: bikin naskah voiceover untuk video vertikal berdurasi sekitar {target_dur} detik.
+# model id yang bukan chat/text — disaring dari dropdown
+_NON_TEXT = ("whisper", "tts", "orpheus", "guard", "embedding", "embed", "safeguard", "rerank")
 
-STRUKTUR WAJIB ({n} scene, urut):
-1. HOOK  - kalimat pertama harus bikin orang berhenti scroll dalam 2 detik. Boleh pertanyaan, pernyataan mengejutkan, atau kontradiksi.
-2. PAIN  - sentuh masalah/keresahan yang dirasakan target sebelum pakai produk ini.
-3. SOLUSI- perkenalkan produknya sebagai jalan keluar, sebutkan cara kerjanya singkat.
-4. BUKTI - manfaat paling konkret / hasil yang dirasakan. Jangan mengarang angka spesifik yang mustahil.
-5. CTA   - ajakan tegas: klik keranjang kuning / link di bio, sebutkan alasan buru-buru.
-(Kalau jumlah scene lebih sedikit, gabungkan bagian tengah. Hook dan CTA wajib ada.)
+CTA_TYPES = {
+    "Keranjang kuning (Shopee)": "arahkan ke keranjang kuning di pojok kiri bawah layar",
+    "Link di bio": "arahkan ke link di bio",
+    "Link dipin di komentar": "arahkan ke link yang dipin di kolom komentar",
+}
 
-ATURAN NASKAH:
-- Bahasa Indonesia santai sehari-hari, bukan bahasa formal atau bahasa terjemahan.
-- Setiap scene 12-20 kata, satu tarikan napas, satu ide.
-- Ini akan dibaca mesin TTS: TANPA emoji, tanpa tanda kurung, tanpa simbol, tanpa singkatan aneh, tanpa huruf kapital semua.
-- Tulis angka dengan huruf kalau pendek (contoh: "tiga puluh ribu"), biar TTS-nya natural.
-- Jangan menyebut kata "AI", "naskah", atau "video ini".
-- Jangan bikin klaim medis, klaim penghasilan pasti, atau garansi bohong.
+ANGLES = {
+    "Racun / impulsif": (
+        "Posisikan produk sebagai racun yang bikin pengen checkout sekarang juga. "
+        "Tekankan sensasi 'kenapa gue baru tahu ini', bukan spesifikasi teknis."
+    ),
+    "Masalah → solusi": (
+        "Buka dengan keresahan sehari-hari yang sangat spesifik, baru tunjukkan produk "
+        "sebagai penyelesaiannya."
+    ),
+    "Before → after": (
+        "Kontraskan kondisi sebelum punya produk ini dengan sesudahnya. Fokus ke perubahan "
+        "yang kelihatan, bukan ke fitur."
+    ),
+    "Hidden gem / underrated": (
+        "Posisikan sebagai temuan langka yang belum banyak orang tahu. Nada seperti "
+        "membocorkan rahasia."
+    ),
+    "Worth it gak sih": (
+        "Buka dengan keraguan harga, lalu patahkan dengan perbandingan nilai yang masuk akal."
+    ),
+}
 
-GAYA YANG DIMINTA: {style}
+SCRIPT_SYSTEM = """Kamu copywriter video affiliate Shopee/TikTok Indonesia. Kamu HANYA menulis untuk afiliator pemula yang jualan produk orang lain dan dibayar komisi. Bukan untuk brand, bukan untuk korporat.
 
-Balas HANYA JSON valid, tanpa penjelasan, tanpa markdown, dengan bentuk persis:
-{{"hook_text": "3-5 kata teks besar di layar", "scenes": [{{"narration": "kalimat voiceover"}}]}}"""
+Tugas: naskah voiceover video vertikal ±{target_dur} detik yang tujuannya SATU — bikin penonton klik dan checkout hari itu juga.
+
+STRUKTUR WAJIB, {n} scene berurutan:
+1. HOOK   - 2 detik pertama. Harus bikin jempol berhenti. Boleh pertanyaan menusuk, pernyataan mengejutkan, atau kontradiksi. DILARANG membuka dengan menyebut nama produk.
+2. PAIN   - keresahan sehari-hari yang sangat spesifik dan bisa dibayangkan. Bukan pain umum.
+3. SOLUSI - produknya masuk sebagai jalan keluar. Sebut satu cara kerja atau satu keunggulan konkret saja.
+4. BUKTI  - satu manfaat yang paling kelihatan hasilnya. Boleh sentuh harga/promo kalau ada datanya.
+5. CTA    - {cta}. Tegas, satu kalimat, kasih alasan buru-buru yang masuk akal (stok, promo, harga naik).
+Kalau scene lebih sedikit, gabungkan bagian tengah. HOOK dan CTA wajib utuh.
+
+ATURAN BAHASA (ketat):
+- Bahasa Indonesia percakapan sehari-hari anak TikTok. Boleh "gue/lo" atau "aku/kamu", pilih satu dan konsisten.
+- DILARANG bahasa iklan korporat: "solusi terbaik", "kualitas premium", "hadir untuk Anda", "produk unggulan", "tingkatkan produktivitas".
+- Setiap scene 12 sampai 20 kata. Satu tarikan napas, satu ide.
+- Naskah ini dibaca mesin TTS: TANPA emoji, tanda kurung, simbol, tanda seru beruntun, atau huruf kapital semua.
+- Tulis angka jadi huruf kalau pendek, contoh "empat puluh lima ribu", supaya TTS-nya natural.
+- Jangan sebut kata AI, naskah, konten, atau video ini.
+- Jangan janjikan penghasilan pasti, klaim medis, atau garansi yang tidak ada di data produk.
+- Jangan mengarang angka rating, jumlah terjual, atau testimoni yang tidak diberikan.
+
+ANGLE YANG DIPAKAI: {angle}
+GAYA VISUAL VIDEONYA: {style}
+
+Balas HANYA JSON valid, tanpa markdown, tanpa penjelasan, persis bentuk ini:
+{{"hook_text": "3 sampai 5 kata teks besar di layar", "scenes": [{{"narration": "kalimat voiceover"}}]}}"""
 
 
 def _extract_json(raw: str) -> dict[str, Any]:
-    raw = raw.strip()
-    raw = re.sub(r"^```(?:json)?|```$", "", raw, flags=re.MULTILINE).strip()
+    raw = re.sub(r"<think>.*?</think>", "", raw or "", flags=re.DOTALL)
+    raw = re.sub(r"^```(?:json)?|```$", "", raw.strip(), flags=re.MULTILINE).strip()
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
@@ -119,25 +158,69 @@ def _extract_json(raw: str) -> dict[str, Any]:
         return json.loads(m.group(0))
 
 
+def list_models(provider: str, api_key: str) -> list[str]:
+    """Ambil daftar model aktif langsung dari provider (anti model-decommissioned)."""
+    if not api_key:
+        return []
+    try:
+        if provider == "Groq":
+            r = requests.get(
+                "https://api.groq.com/openai/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=20,
+            )
+            r.raise_for_status()
+            ids = [m["id"] for m in r.json().get("data", [])]
+        else:
+            r = requests.get(
+                "https://generativelanguage.googleapis.com/v1beta/models",
+                headers={"x-goog-api-key": api_key},
+                params={"pageSize": 200},
+                timeout=20,
+            )
+            r.raise_for_status()
+            ids = [
+                m["name"].split("/")[-1]
+                for m in r.json().get("models", [])
+                if "generateContent" in m.get("supportedGenerationMethods", [])
+            ]
+        ids = [i for i in ids if not any(k in i.lower() for k in _NON_TEXT)]
+        return sorted(set(ids))
+    except Exception:
+        return []
+
+
 def _call_groq(api_key: str, model: str, system: str, user: str) -> str:
-    r = requests.post(
-        GROQ_URL,
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        json={
-            "model": model,
-            "temperature": 0.9,
-            "max_tokens": 900,
-            "response_format": {"type": "json_object"},
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-        },
-        timeout=90,
-    )
-    if r.status_code != 200:
-        raise RuntimeError(f"Groq error {r.status_code}: {r.text[:300]}")
-    return r.json()["choices"][0]["message"]["content"]
+    base = {
+        "model": model,
+        "temperature": 0.95,
+        "max_tokens": 1400,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+    }
+    # extras dilepas satu per satu kalau model tidak mendukungnya
+    attempts = [
+        {**base, "response_format": {"type": "json_object"}, "reasoning_effort": "low"},
+        {**base, "response_format": {"type": "json_object"}},
+        base,
+    ]
+    last = ""
+    for payload in attempts:
+        r = requests.post(
+            GROQ_URL,
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=90,
+        )
+        if r.status_code == 200:
+            msg = r.json()["choices"][0]["message"]
+            return msg.get("content") or msg.get("reasoning") or ""
+        last = r.text[:400]
+        if r.status_code != 400:
+            break
+    raise RuntimeError(f"Groq error: {last}")
 
 
 def _call_gemini(api_key: str, model: str, system: str, user: str) -> str:
@@ -148,15 +231,15 @@ def _call_gemini(api_key: str, model: str, system: str, user: str) -> str:
             "systemInstruction": {"parts": [{"text": system}]},
             "contents": [{"role": "user", "parts": [{"text": user}]}],
             "generationConfig": {
-                "temperature": 0.9,
-                "maxOutputTokens": 900,
+                "temperature": 0.95,
+                "maxOutputTokens": 1400,
                 "responseMimeType": "application/json",
             },
         },
         timeout=90,
     )
     if r.status_code != 200:
-        raise RuntimeError(f"Gemini error {r.status_code}: {r.text[:300]}")
+        raise RuntimeError(f"Gemini error {r.status_code}: {r.text[:400]}")
     data = r.json()
     return "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"])
 
@@ -167,16 +250,24 @@ def generate_script(
     model: str,
     product: str,
     audience: str,
+    price_note: str,
     concept: str,
+    angle: str,
+    cta: str,
     n_scenes: int,
     target_dur: int,
 ) -> tuple[str, list[str]]:
     system = SCRIPT_SYSTEM.format(
-        n=n_scenes, style=CONCEPT_BRIEF[concept], target_dur=target_dur
+        n=n_scenes,
+        style=CONCEPT_BRIEF[concept],
+        angle=ANGLES[angle],
+        cta=CTA_TYPES[cta],
+        target_dur=target_dur,
     )
     user = (
-        f"PRODUK / DESKRIPSI:\n{product.strip()}\n\n"
-        f"TARGET PENONTON:\n{audience.strip() or 'pengguna Shopee umum di Indonesia'}"
+        f"PRODUK:\n{product.strip()}\n\n"
+        f"TARGET PENONTON:\n{audience.strip() or 'pengguna Shopee Indonesia umur 18-30'}\n\n"
+        f"HARGA / PROMO:\n{price_note.strip() or 'tidak disebutkan, jangan mengarang angka'}"
     )
 
     raw = (_call_groq if provider == "Groq" else _call_gemini)(api_key, model, system, user)
@@ -188,7 +279,7 @@ def generate_script(
         if str(s.get("narration", "")).strip()
     ]
     if not scenes:
-        raise ValueError("Naskah kosong. Coba generate ulang.")
+        raise ValueError("Naskah kosong. Coba generate ulang atau ganti model.")
 
     hook_text = str(data.get("hook_text", "")).strip()[:40]
     return hook_text, scenes[:n_scenes]
@@ -689,42 +780,72 @@ def produce(
 # 7. UI
 # ──────────────────────────────────────────────────────────────────────────────
 
-st.set_page_config(page_title="KlipCuan — AI Faceless Affiliate Video Engine",
-                   page_icon="🎬", layout="centered")
+st.set_page_config(page_title="KlipCuan — Screenshot Shopee jadi Video Keranjang Kuning",
+                   page_icon="🛒", layout="centered")
 
 st.markdown(
     """
 <style>
-  .block-container {padding-top: 2.4rem; max-width: 780px;}
+  .block-container {padding-top: 2.4rem; max-width: 800px;}
   h1 {letter-spacing:-.02em;}
   .kc-sub {color:#8b8f98; font-size:.95rem; margin-top:-.6rem;}
   div.stButton > button {width:100%; height:3rem; font-weight:600; border-radius:.6rem;}
+  .kc-step {font-size:.78rem; letter-spacing:.09em; text-transform:uppercase;
+            color:#9aa0aa; font-weight:700; margin:1.6rem 0 .3rem;}
 </style>
 """,
     unsafe_allow_html=True,
 )
 
 st.title("KlipCuan")
-st.markdown('<p class="kc-sub">AI Faceless Affiliate Video Engine — foto produk masuk, video vertikal siap upload keluar.</p>',
-            unsafe_allow_html=True)
+st.markdown(
+    '<p class="kc-sub">Screenshot Shopee → video keranjang kuning. Khusus afiliator, bukan tools video umum.</p>',
+    unsafe_allow_html=True,
+)
 
 if shutil.which("ffmpeg") is None:
     st.error("FFmpeg tidak ditemukan. Lokal: install ffmpeg. Deploy: pastikan `packages.txt` berisi `ffmpeg`.")
     st.stop()
 
+ss = st.session_state
+ss.setdefault("hook_text", "")
+ss.setdefault("narrations", [])
+ss.setdefault("video", None)
+
+
+@st.cache_data(show_spinner=False, ttl=1800)
+def cached_models(provider: str, key: str) -> list[str]:
+    return list_models(provider, key)
+
+
 with st.sidebar:
     st.subheader("Konfigurasi AI")
     provider = st.radio("Penyedia naskah", ["Groq", "Gemini"], horizontal=True)
-    default_model = "llama-3.1-70b-versatile" if provider == "Groq" else "gemini-2.0-flash"
     secret_key = st.secrets.get("GROQ_API_KEY" if provider == "Groq" else "GEMINI_API_KEY", "")
     api_key = st.text_input("API Key", value=secret_key, type="password",
                             help="Groq: console.groq.com  •  Gemini: aistudio.google.com")
-    model = st.text_input("Model", value=default_model)
+
+    fallback = DEFAULT_MODELS[provider]
+    available = cached_models(provider, api_key) if api_key else []
+    c1, c2 = st.columns([4, 1])
+    with c1:
+        if available:
+            idx = available.index(fallback) if fallback in available else 0
+            model = st.selectbox("Model (live dari API)", available, index=idx)
+        else:
+            model = st.text_input("Model", value=fallback)
+    with c2:
+        st.write("")
+        if st.button("🔄", help="Muat ulang daftar model"):
+            cached_models.clear()
+            st.rerun()
+    if api_key and not available:
+        st.caption("Daftar model gagal dimuat — pakai isian manual.")
 
     st.divider()
     st.subheader("Voice & Tempo")
     voice_label = st.selectbox("Suara", list(VOICES.keys()))
-    speed = st.slider("Kecepatan bicara", -15, 25, 6, 1, format="%d%%")
+    speed = st.slider("Kecepatan bicara", -15, 25, 8, 1, format="%d%%")
     pitch = st.slider("Pitch (Hz)", -20, 20, 0, 2)
 
     st.divider()
@@ -733,19 +854,32 @@ with st.sidebar:
     transitions = st.toggle("Transisi fade halus antar scene", value=True)
     add_grain = st.toggle("Film grain tipis (anti-plastik)", value=True)
 
+st.markdown('<div class="kc-step">Langkah 1 · Produk affiliate</div>', unsafe_allow_html=True)
+
 product = st.text_area(
-    "Nama / deskripsi produk",
-    placeholder="Contoh: Lampu tidur sunset projector RGB, bisa remote, cocok buat kamar kos biar aesthetic. Harga 45 ribuan di Shopee.",
+    "Nama / deskripsi produk yang lo promosiin",
+    placeholder="Contoh: Sunset projector lamp RGB, ada remote, 16 warna, cocok buat kamar kos biar aesthetic. Toko Star Official, rating 4.9.",
     height=110,
 )
 audience = st.text_input(
-    "Target penonton (opsional)",
-    placeholder="Contoh: cewek umur 18-25 anak kos yang suka dekor kamar",
+    "Target penonton",
+    placeholder="Contoh: cewek 18-25 anak kos yang suka dekor kamar",
 )
+price_note = st.text_input(
+    "Harga / promo (kosongkan kalau tidak mau disebut)",
+    placeholder="Contoh: 45 ribu, lagi flash sale, gratis ongkir",
+)
+
+c1, c2 = st.columns(2)
+with c1:
+    angle = st.selectbox("Angle naskah", list(ANGLES.keys()))
+with c2:
+    cta = st.selectbox("Arah CTA", list(CTA_TYPES.keys()))
+
 concept_label = st.selectbox("Konsep / gaya video", list(CONCEPTS.keys()))
 concept = CONCEPTS[concept_label]
 
-files = st.file_uploader("Foto produk (1–3 gambar, screenshot Shopee juga boleh)",
+files = st.file_uploader("Screenshot produk Shopee (1–3 gambar)",
                          type=["jpg", "jpeg", "png", "webp"], accept_multiple_files=True)
 
 photos: list[Image.Image] = []
@@ -756,55 +890,69 @@ if files:
         except Exception:
             st.warning(f"Gagal membaca {f.name}, dilewati.")
     if photos:
-        st.image([p for p in photos], width=118)
+        st.image(photos, width=118)
 
 st.write("")
-go = st.button("🎬 Generate Video", type="primary", disabled=not (product.strip() and photos and api_key))
+ready = bool(product.strip() and photos and api_key)
+if st.button("✍️ Buat Naskah", type="secondary", disabled=not ready):
+    try:
+        with st.spinner("Nulis naskah…"):
+            ss.hook_text, ss.narrations = generate_script(
+                provider, api_key, model, product, audience, price_note,
+                concept, angle, cta, n_scenes, int(n_scenes * 5.5),
+            )
+            ss.video = None
+    except Exception as e:
+        st.error("Gagal bikin naskah.")
+        st.code(str(e)[:1200])
 
 if not api_key:
     st.caption("Isi API Key di sidebar dulu ya.")
 
-if go:
-    bar = st.progress(0.0, text="Menulis naskah…")
+# ── Langkah 2: edit naskah lalu render ────────────────────────────────────────
+if ss.narrations:
+    st.markdown('<div class="kc-step">Langkah 2 · Cek & edit naskah</div>', unsafe_allow_html=True)
+    st.caption("Betulin nama produk yang salah baca TTS di sini sebelum render — jauh lebih cepat daripada render ulang.")
 
-    def upd(v: float, msg: str):
-        bar.progress(v, text=msg)
+    ss.hook_text = st.text_input("Teks hook di layar", value=ss.hook_text, max_chars=40)
+    edited = []
+    for i, t in enumerate(ss.narrations):
+        edited.append(st.text_area(f"Scene {i + 1}", value=t, height=72, key=f"nar{i}"))
+    ss.narrations = [e.strip() for e in edited if e.strip()]
 
-    try:
-        target_dur = int(n_scenes * 5.5)
-        hook_text, narrations = generate_script(
-            provider, api_key, model, product, audience, concept, n_scenes, target_dur
-        )
+    st.markdown('<div class="kc-step">Langkah 3 · Render</div>', unsafe_allow_html=True)
+    if st.button("🎬 Generate Video", type="primary", disabled=not photos):
+        bar = st.progress(0.0, text="Menyiapkan…")
 
-        with st.expander("Naskah yang dipakai", expanded=False):
-            st.write(f"**Hook di layar:** {hook_text or '—'}")
-            for i, t in enumerate(narrations, 1):
-                st.write(f"{i}. {t}")
+        def upd(v: float, msg: str):
+            bar.progress(v, text=msg)
 
-        video = produce(
-            photos=photos,
-            concept=concept,
-            hook_text=hook_text,
-            narrations=narrations,
-            voice=VOICES[voice_label],
-            rate=f"{speed:+d}%",
-            pitch=f"{pitch:+d}Hz",
-            add_grain=add_grain,
-            transitions=transitions,
-            progress=upd,
-        )
+        try:
+            ss.video = produce(
+                photos=photos,
+                concept=concept,
+                hook_text=ss.hook_text,
+                narrations=ss.narrations,
+                voice=VOICES[voice_label],
+                rate=f"{speed:+d}%",
+                pitch=f"{pitch:+d}Hz",
+                add_grain=add_grain,
+                transitions=transitions,
+                progress=upd,
+            )
+            bar.progress(1.0, text="Selesai.")
+        except Exception as e:
+            bar.empty()
+            st.error("Gagal render video.")
+            st.code(str(e)[:1800])
 
-        bar.progress(1.0, text="Selesai.")
-        st.success("Video siap. Cek dulu sebelum upload.")
-        st.video(video)
-        st.download_button(
-            "⬇️ Download MP4",
-            data=video,
-            file_name=f"klipcuan_{concept}_{uuid.uuid4().hex[:6]}.mp4",
-            mime="video/mp4",
-            type="primary",
-        )
-    except Exception as e:
-        bar.empty()
-        st.error("Gagal generate video.")
-        st.code(str(e)[:1800])
+if ss.video:
+    st.success("Video siap. Cek dulu sebelum upload.")
+    st.video(ss.video)
+    st.download_button(
+        "⬇️ Download MP4",
+        data=ss.video,
+        file_name=f"klipcuan_{concept}_{uuid.uuid4().hex[:6]}.mp4",
+        mime="video/mp4",
+        type="primary",
+    )
