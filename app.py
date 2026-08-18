@@ -35,7 +35,16 @@ import requests
 import streamlit as st
 from PIL import Image, ImageDraw, ImageFilter, ImageOps
 
-FFMPEG_BIN = imageio_ffmpeg.get_ffmpeg_exe()
+# Init FFmpeg dibungkus try/except dan dipindah ke bawah st.set_page_config, supaya
+# kalau gagal (mis. platform tidak didukung imageio-ffmpeg), errornya dipaksa tampil
+# jelas lewat st.exception() di halaman app — bukan crash senyap sebelum Streamlit
+# sempat merender apa pun (yang bisa muncul sebagai "Oh no." kosong tanpa traceback).
+FFMPEG_BIN: str | None = None
+FFMPEG_INIT_ERROR: Exception | None = None
+try:
+    FFMPEG_BIN = imageio_ffmpeg.get_ffmpeg_exe()
+except Exception as _e:  # noqa: BLE001
+    FFMPEG_INIT_ERROR = _e
 
 try:
     import edge_tts
@@ -802,181 +811,194 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("KlipCuan")
-st.markdown(
-    '<p class="kc-sub">Screenshot Shopee → video keranjang kuning. Khusus afiliator, bukan tools video umum.</p>',
-    unsafe_allow_html=True,
-)
-
-if not os.path.exists(FFMPEG_BIN):
-    st.error("Binary FFmpeg tidak ditemukan. Coba `pip install --force-reinstall imageio-ffmpeg`.")
-    st.stop()
-
-
-@st.cache_resource(show_spinner=False)
-def _ffmpeg_supports_ass() -> bool:
-    try:
-        out = subprocess.run([FFMPEG_BIN, "-hide_banner", "-filters"],
-                             capture_output=True, text=True, timeout=15)
-        return " ass " in out.stdout or "\nass" in out.stdout
-    except Exception:
-        return False
-
-
-if not _ffmpeg_supports_ass():
-    st.error(
-        "Binary FFmpeg dari `imageio-ffmpeg` di server ini tidak dikompilasi dengan libass "
-        "(dibutuhkan buat burn-in subtitle). Fallback: tambahkan `ffmpeg` lagi ke `packages.txt`, "
-        "atau pin versi lain: `imageio-ffmpeg==0.4.9`."
+try:
+    st.title("KlipCuan")
+    st.markdown(
+        '<p class="kc-sub">Screenshot Shopee → video keranjang kuning. Khusus afiliator, bukan tools video umum.</p>',
+        unsafe_allow_html=True,
     )
-    st.stop()
 
-ss = st.session_state
-ss.setdefault("hook_text", "")
-ss.setdefault("narrations", [])
-ss.setdefault("video", None)
+    if FFMPEG_INIT_ERROR is not None:
+        st.error("Gagal menyiapkan FFmpeg (imageio-ffmpeg). Detail error di bawah:")
+        st.exception(FFMPEG_INIT_ERROR)
+        st.stop()
 
-
-@st.cache_data(show_spinner=False, ttl=1800)
-def cached_models(provider: str, key: str) -> list[str]:
-    return list_models(provider, key)
+    if not FFMPEG_BIN or not os.path.exists(FFMPEG_BIN):
+        st.error(f"Binary FFmpeg tidak ditemukan di path `{FFMPEG_BIN}`. Coba `pip install --force-reinstall imageio-ffmpeg`.")
+        st.stop()
 
 
-with st.sidebar:
-    st.subheader("Konfigurasi AI")
-    provider = st.radio("Penyedia naskah", ["Groq", "Gemini"], horizontal=True)
-    secret_key = st.secrets.get("GROQ_API_KEY" if provider == "Groq" else "GEMINI_API_KEY", "")
-    api_key = st.text_input("API Key", value=secret_key, type="password",
-                            help="Groq: console.groq.com  •  Gemini: aistudio.google.com")
-
-    fallback = DEFAULT_MODELS[provider]
-    available = cached_models(provider, api_key) if api_key else []
-    c1, c2 = st.columns([4, 1])
-    with c1:
-        if available:
-            idx = available.index(fallback) if fallback in available else 0
-            model = st.selectbox("Model (live dari API)", available, index=idx)
-        else:
-            model = st.text_input("Model", value=fallback)
-    with c2:
-        st.write("")
-        if st.button("🔄", help="Muat ulang daftar model"):
-            cached_models.clear()
-            st.rerun()
-    if api_key and not available:
-        st.caption("Daftar model gagal dimuat — pakai isian manual.")
-
-    st.divider()
-    st.subheader("Voice & Tempo")
-    voice_label = st.selectbox("Suara", list(VOICES.keys()))
-    speed = st.slider("Kecepatan bicara", -15, 25, 8, 1, format="%d%%")
-    pitch = st.slider("Pitch (Hz)", -20, 20, 0, 2)
-
-    st.divider()
-    st.subheader("Render")
-    n_scenes = st.slider("Jumlah scene", 3, 6, 5)
-    transitions = st.toggle("Transisi fade halus antar scene", value=True)
-    add_grain = st.toggle("Film grain tipis (anti-plastik)", value=True)
-
-st.markdown('<div class="kc-step">Langkah 1 · Produk affiliate</div>', unsafe_allow_html=True)
-
-product = st.text_area(
-    "Nama / deskripsi produk yang lo promosiin",
-    placeholder="Contoh: Sunset projector lamp RGB, ada remote, 16 warna, cocok buat kamar kos biar aesthetic. Toko Star Official, rating 4.9.",
-    height=110,
-)
-audience = st.text_input(
-    "Target penonton",
-    placeholder="Contoh: cewek 18-25 anak kos yang suka dekor kamar",
-)
-price_note = st.text_input(
-    "Harga / promo (kosongkan kalau tidak mau disebut)",
-    placeholder="Contoh: 45 ribu, lagi flash sale, gratis ongkir",
-)
-
-c1, c2 = st.columns(2)
-with c1:
-    angle = st.selectbox("Angle naskah", list(ANGLES.keys()))
-with c2:
-    cta = st.selectbox("Arah CTA", list(CTA_TYPES.keys()))
-
-concept_label = st.selectbox("Konsep / gaya video", list(CONCEPTS.keys()))
-concept = CONCEPTS[concept_label]
-
-files = st.file_uploader("Screenshot produk Shopee (1–3 gambar)",
-                         type=["jpg", "jpeg", "png", "webp"], accept_multiple_files=True)
-
-photos: list[Image.Image] = []
-if files:
-    for f in files[:3]:
+    @st.cache_resource(show_spinner=False)
+    def _ffmpeg_supports_ass() -> tuple[bool, str]:
         try:
-            photos.append(ImageOps.exif_transpose(Image.open(io.BytesIO(f.getvalue()))).convert("RGB"))
-        except Exception:
-            st.warning(f"Gagal membaca {f.name}, dilewati.")
-    if photos:
-        st.image(photos, width=118)
-
-st.write("")
-ready = bool(product.strip() and photos and api_key)
-if st.button("✍️ Buat Naskah", type="secondary", disabled=not ready):
-    try:
-        with st.spinner("Nulis naskah…"):
-            ss.hook_text, ss.narrations = generate_script(
-                provider, api_key, model, product, audience, price_note,
-                concept, angle, cta, n_scenes, int(n_scenes * 5.5),
-            )
-            ss.video = None
-    except Exception as e:
-        st.error("Gagal bikin naskah.")
-        st.code(str(e)[:1200])
-
-if not api_key:
-    st.caption("Isi API Key di sidebar dulu ya.")
-
-# ── Langkah 2: edit naskah lalu render ────────────────────────────────────────
-if ss.narrations:
-    st.markdown('<div class="kc-step">Langkah 2 · Cek & edit naskah</div>', unsafe_allow_html=True)
-    st.caption("Betulin nama produk yang salah baca TTS di sini sebelum render — jauh lebih cepat daripada render ulang.")
-
-    ss.hook_text = st.text_input("Teks hook di layar", value=ss.hook_text, max_chars=40)
-    edited = []
-    for i, t in enumerate(ss.narrations):
-        edited.append(st.text_area(f"Scene {i + 1}", value=t, height=72, key=f"nar{i}"))
-    ss.narrations = [e.strip() for e in edited if e.strip()]
-
-    st.markdown('<div class="kc-step">Langkah 3 · Render</div>', unsafe_allow_html=True)
-    if st.button("🎬 Generate Video", type="primary", disabled=not photos):
-        bar = st.progress(0.0, text="Menyiapkan…")
-
-        def upd(v: float, msg: str):
-            bar.progress(v, text=msg)
-
-        try:
-            ss.video = produce(
-                photos=photos,
-                concept=concept,
-                hook_text=ss.hook_text,
-                narrations=ss.narrations,
-                voice=VOICES[voice_label],
-                rate=f"{speed:+d}%",
-                pitch=f"{pitch:+d}Hz",
-                add_grain=add_grain,
-                transitions=transitions,
-                progress=upd,
-            )
-            bar.progress(1.0, text="Selesai.")
+            out = subprocess.run([FFMPEG_BIN, "-hide_banner", "-filters"],
+                                 capture_output=True, text=True, timeout=15)
+            ok = " ass " in out.stdout or "\nass" in out.stdout
+            return ok, out.stdout[-500:] if not ok else ""
         except Exception as e:
-            bar.empty()
-            st.error("Gagal render video.")
-            st.code(str(e)[:1800])
+            return False, str(e)
 
-if ss.video:
-    st.success("Video siap. Cek dulu sebelum upload.")
-    st.video(ss.video)
-    st.download_button(
-        "⬇️ Download MP4",
-        data=ss.video,
-        file_name=f"klipcuan_{concept}_{uuid.uuid4().hex[:6]}.mp4",
-        mime="video/mp4",
-        type="primary",
+
+    _ass_ok, _ass_detail = _ffmpeg_supports_ass()
+    if not _ass_ok:
+        st.error(
+            "Binary FFmpeg dari `imageio-ffmpeg` di server ini tidak dikompilasi dengan libass "
+            "(dibutuhkan buat burn-in subtitle). Fallback: tambahkan `ffmpeg` lagi ke `packages.txt`, "
+            "atau pin versi lain: `imageio-ffmpeg==0.4.9`."
+        )
+        if _ass_detail:
+            st.code(_ass_detail)
+        st.stop()
+
+    ss = st.session_state
+    ss.setdefault("hook_text", "")
+    ss.setdefault("narrations", [])
+    ss.setdefault("video", None)
+
+
+    @st.cache_data(show_spinner=False, ttl=1800)
+    def cached_models(provider: str, key: str) -> list[str]:
+        return list_models(provider, key)
+
+
+    with st.sidebar:
+        st.subheader("Konfigurasi AI")
+        provider = st.radio("Penyedia naskah", ["Groq", "Gemini"], horizontal=True)
+        secret_key = st.secrets.get("GROQ_API_KEY" if provider == "Groq" else "GEMINI_API_KEY", "")
+        api_key = st.text_input("API Key", value=secret_key, type="password",
+                                help="Groq: console.groq.com  •  Gemini: aistudio.google.com")
+
+        fallback = DEFAULT_MODELS[provider]
+        available = cached_models(provider, api_key) if api_key else []
+        c1, c2 = st.columns([4, 1])
+        with c1:
+            if available:
+                idx = available.index(fallback) if fallback in available else 0
+                model = st.selectbox("Model (live dari API)", available, index=idx)
+            else:
+                model = st.text_input("Model", value=fallback)
+        with c2:
+            st.write("")
+            if st.button("🔄", help="Muat ulang daftar model"):
+                cached_models.clear()
+                st.rerun()
+        if api_key and not available:
+            st.caption("Daftar model gagal dimuat — pakai isian manual.")
+
+        st.divider()
+        st.subheader("Voice & Tempo")
+        voice_label = st.selectbox("Suara", list(VOICES.keys()))
+        speed = st.slider("Kecepatan bicara", -15, 25, 8, 1, format="%d%%")
+        pitch = st.slider("Pitch (Hz)", -20, 20, 0, 2)
+
+        st.divider()
+        st.subheader("Render")
+        n_scenes = st.slider("Jumlah scene", 3, 6, 5)
+        transitions = st.toggle("Transisi fade halus antar scene", value=True)
+        add_grain = st.toggle("Film grain tipis (anti-plastik)", value=True)
+
+    st.markdown('<div class="kc-step">Langkah 1 · Produk affiliate</div>', unsafe_allow_html=True)
+
+    product = st.text_area(
+        "Nama / deskripsi produk yang lo promosiin",
+        placeholder="Contoh: Sunset projector lamp RGB, ada remote, 16 warna, cocok buat kamar kos biar aesthetic. Toko Star Official, rating 4.9.",
+        height=110,
     )
+    audience = st.text_input(
+        "Target penonton",
+        placeholder="Contoh: cewek 18-25 anak kos yang suka dekor kamar",
+    )
+    price_note = st.text_input(
+        "Harga / promo (kosongkan kalau tidak mau disebut)",
+        placeholder="Contoh: 45 ribu, lagi flash sale, gratis ongkir",
+    )
+
+    c1, c2 = st.columns(2)
+    with c1:
+        angle = st.selectbox("Angle naskah", list(ANGLES.keys()))
+    with c2:
+        cta = st.selectbox("Arah CTA", list(CTA_TYPES.keys()))
+
+    concept_label = st.selectbox("Konsep / gaya video", list(CONCEPTS.keys()))
+    concept = CONCEPTS[concept_label]
+
+    files = st.file_uploader("Screenshot produk Shopee (1–3 gambar)",
+                             type=["jpg", "jpeg", "png", "webp"], accept_multiple_files=True)
+
+    photos: list[Image.Image] = []
+    if files:
+        for f in files[:3]:
+            try:
+                photos.append(ImageOps.exif_transpose(Image.open(io.BytesIO(f.getvalue()))).convert("RGB"))
+            except Exception:
+                st.warning(f"Gagal membaca {f.name}, dilewati.")
+        if photos:
+            st.image(photos, width=118)
+
+    st.write("")
+    ready = bool(product.strip() and photos and api_key)
+    if st.button("✍️ Buat Naskah", type="secondary", disabled=not ready):
+        try:
+            with st.spinner("Nulis naskah…"):
+                ss.hook_text, ss.narrations = generate_script(
+                    provider, api_key, model, product, audience, price_note,
+                    concept, angle, cta, n_scenes, int(n_scenes * 5.5),
+                )
+                ss.video = None
+        except Exception as e:
+            st.error("Gagal bikin naskah.")
+            st.code(str(e)[:1200])
+
+    if not api_key:
+        st.caption("Isi API Key di sidebar dulu ya.")
+
+    # ── Langkah 2: edit naskah lalu render ────────────────────────────────────────
+    if ss.narrations:
+        st.markdown('<div class="kc-step">Langkah 2 · Cek & edit naskah</div>', unsafe_allow_html=True)
+        st.caption("Betulin nama produk yang salah baca TTS di sini sebelum render — jauh lebih cepat daripada render ulang.")
+
+        ss.hook_text = st.text_input("Teks hook di layar", value=ss.hook_text, max_chars=40)
+        edited = []
+        for i, t in enumerate(ss.narrations):
+            edited.append(st.text_area(f"Scene {i + 1}", value=t, height=72, key=f"nar{i}"))
+        ss.narrations = [e.strip() for e in edited if e.strip()]
+
+        st.markdown('<div class="kc-step">Langkah 3 · Render</div>', unsafe_allow_html=True)
+        if st.button("🎬 Generate Video", type="primary", disabled=not photos):
+            bar = st.progress(0.0, text="Menyiapkan…")
+
+            def upd(v: float, msg: str):
+                bar.progress(v, text=msg)
+
+            try:
+                ss.video = produce(
+                    photos=photos,
+                    concept=concept,
+                    hook_text=ss.hook_text,
+                    narrations=ss.narrations,
+                    voice=VOICES[voice_label],
+                    rate=f"{speed:+d}%",
+                    pitch=f"{pitch:+d}Hz",
+                    add_grain=add_grain,
+                    transitions=transitions,
+                    progress=upd,
+                )
+                bar.progress(1.0, text="Selesai.")
+            except Exception as e:
+                bar.empty()
+                st.error("Gagal render video.")
+                st.code(str(e)[:1800])
+
+    if ss.video:
+        st.success("Video siap. Cek dulu sebelum upload.")
+        st.video(ss.video)
+        st.download_button(
+            "⬇️ Download MP4",
+            data=ss.video,
+            file_name=f"klipcuan_{concept}_{uuid.uuid4().hex[:6]}.mp4",
+            mime="video/mp4",
+            type="primary",
+        )
+except Exception as _fatal_err:  # noqa: BLE001
+    st.error("Terjadi error yang tidak tertangani. Detail lengkap di bawah ini:")
+    st.exception(_fatal_err)
