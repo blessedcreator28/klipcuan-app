@@ -715,7 +715,7 @@ if shutil.which("ffmpeg") is None:
 with st.sidebar:
     st.subheader("Konfigurasi AI")
     provider = st.radio("Penyedia naskah", ["Groq", "Gemini"], horizontal=True)
-    default_model = "llama-3.3-70b-versatile" if provider == "Groq" else "gemini-2.0-flash"
+    default_model = "llama-3.1-70b-versatile" if provider == "Groq" else "gemini-2.0-flash"
     secret_key = st.secrets.get("GROQ_API_KEY" if provider == "Groq" else "GEMINI_API_KEY", "")
     api_key = st.text_input("API Key", value=secret_key, type="password",
                             help="Groq: console.groq.com  •  Gemini: aistudio.google.com")
