@@ -7,8 +7,13 @@ Streamlit MVP. 100% free stack:
   - Komposisi   : Pillow (bikin frame 2160x3840 -> anti distorsi, blur bg, phone mockup)
   - Render      : FFmpeg (Ken Burns zoompan + xfade + subtitle ASS)
 
+FFmpeg dipakai lewat binary mandiri dari package `imageio-ffmpeg` (bukan apt),
+supaya tidak menarik seluruh stack GTK/X11/systemd yang biasanya jadi
+dependency paket `ffmpeg` di Debian — itu bisa >250 package & 700 MB, gampang
+bikin container di free-tier hosting kehabisan resource dan mati tanpa traceback.
+
 Jalankan lokal : streamlit run app.py
-Deploy         : Streamlit Community Cloud (packages.txt sudah menyertakan ffmpeg)
+Deploy         : Streamlit Community Cloud (packages.txt cuma butuh font)
 """
 
 from __future__ import annotations
@@ -25,9 +30,12 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
+import imageio_ffmpeg
 import requests
 import streamlit as st
 from PIL import Image, ImageDraw, ImageFilter, ImageOps
+
+FFMPEG_BIN = imageio_ffmpeg.get_ffmpeg_exe()
 
 try:
     import edge_tts
@@ -612,21 +620,18 @@ def _run(cmd: list[str], cwd: str) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
 
 
-def ffprobe_duration(path: str, cwd: str) -> float:
-    p = _run(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-         "-of", "default=nw=1:nk=1", path],
-        cwd,
-    )
-    try:
-        return float(p.stdout.strip())
-    except ValueError:
-        raise RuntimeError(f"ffprobe gagal membaca {path}: {p.stderr[:300]}")
+def scene_duration(sa: "SceneAudio", text: str) -> float:
+    """Durasi audio per scene, dari timestamp WordBoundary edge-tts sendiri —
+    tidak butuh ffprobe sama sekali. Fallback estimasi kasar kalau TTS tidak
+    mengembalikan word boundary (jarang, teks terlalu pendek/aneh)."""
+    if sa.words:
+        return max(w["end"] for w in sa.words)
+    return max(1.2, len(text.split()) / 2.3)  # ~2.3 kata/detik, estimasi aman
 
 
 def build_audio(workdir: str, n: int, pads: list[float]) -> str:
     """Gabung mp3 tiap scene + jeda napas jadi satu track WAV."""
-    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"]
+    cmd = [FFMPEG_BIN, "-y", "-hide_banner", "-loglevel", "error"]
     for i in range(n):
         cmd += ["-i", f"sc{i}.mp3"]
     parts = [f"[{i}:a]aresample=44100,apad=pad_dur={pads[i]:.3f}[a{i}];" for i in range(n)]
@@ -669,7 +674,7 @@ def render_video(
     xf = XFADE_DUR if (use_transitions and n > 1) else 0.0
     seg_durs = [d + (xf if i < n - 1 else 0.0) for i, d in enumerate(scene_durs)]
 
-    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"]
+    cmd = [FFMPEG_BIN, "-y", "-hide_banner", "-loglevel", "error"]
     for i in range(n):
         cmd += ["-loop", "1", "-framerate", str(FPS), "-t", f"{seg_durs[i]:.3f}", "-i", f"frame{i}.png"]
     cmd += ["-i", audio_file]
@@ -743,7 +748,7 @@ def produce(
         progress(0.35, "Menyusun timeline & subtitle…")
         pads = [SCENE_PAD] * n
         pads[-1] = TAIL_PAD
-        raw_durs = [ffprobe_duration(f"sc{i}.mp3", workdir) for i in range(n)]
+        raw_durs = [scene_duration(audios[i], narrations[i]) for i in range(n)]
         scene_durs = [raw_durs[i] + pads[i] for i in range(n)]
         starts, acc = [], 0.0
         for d in scene_durs:
@@ -803,8 +808,27 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-if shutil.which("ffmpeg") is None:
-    st.error("FFmpeg tidak ditemukan. Lokal: install ffmpeg. Deploy: pastikan `packages.txt` berisi `ffmpeg`.")
+if not os.path.exists(FFMPEG_BIN):
+    st.error("Binary FFmpeg tidak ditemukan. Coba `pip install --force-reinstall imageio-ffmpeg`.")
+    st.stop()
+
+
+@st.cache_resource(show_spinner=False)
+def _ffmpeg_supports_ass() -> bool:
+    try:
+        out = subprocess.run([FFMPEG_BIN, "-hide_banner", "-filters"],
+                             capture_output=True, text=True, timeout=15)
+        return " ass " in out.stdout or "\nass" in out.stdout
+    except Exception:
+        return False
+
+
+if not _ffmpeg_supports_ass():
+    st.error(
+        "Binary FFmpeg dari `imageio-ffmpeg` di server ini tidak dikompilasi dengan libass "
+        "(dibutuhkan buat burn-in subtitle). Fallback: tambahkan `ffmpeg` lagi ke `packages.txt`, "
+        "atau pin versi lain: `imageio-ffmpeg==0.4.9`."
+    )
     st.stop()
 
 ss = st.session_state
