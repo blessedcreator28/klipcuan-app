@@ -59,9 +59,14 @@ try:
     # ──────────────────────────────────────────────────────────────────────────────
 
     OUT_W, OUT_H = 1080, 1920          # output final (9:16)
-    SS = 2                              # supersample: komposisi digambar 2x lalu di-downscale
+    # Supersample dikecilin dari 2x ke 1x. Render di 2x itu 4x lebih berat buat Pillow
+    # (compositing per-frame) & FFmpeg (zoompan/xfade/subtitle burn-in) — di free-tier
+    # hosting (RAM/CPU terbatas) ini yang bikin container mati (OOM) pas render, bukan
+    # pas buka halaman. 1x tetap kelihatan clean untuk Ken Burns 1.10x karena sumbernya
+    # foto asli, bukan hasil upscale.
+    SS = 1
     CANVAS_W, CANVAS_H = OUT_W * SS, OUT_H * SS
-    FPS = 30
+    FPS = 24                            # 30->24: ~20% lebih sedikit frame buat di-render
     XFADE_DUR = 0.5                     # transisi lembut antar scene (detik)
     SCENE_PAD = 0.35                    # jeda napas setelah tiap kalimat
     TAIL_PAD = 0.9                      # ekor di scene terakhir biar gak kepotong
@@ -679,7 +684,7 @@ try:
         audio_file: str,
         ass_file: str,
         use_transitions: bool,
-        crf: int = 21,
+        crf: int = 23,
     ) -> str:
         total = sum(scene_durs)
         xf = XFADE_DUR if (use_transitions and n > 1) else 0.0
@@ -717,7 +722,7 @@ try:
             "-filter_complex", filt,
             "-map", "[vout]", "-map", f"{n}:a",
             "-t", f"{total:.3f}",
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", str(crf),
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", str(crf),
             "-profile:v", "high", "-pix_fmt", "yuv420p", "-r", str(FPS),
             "-movflags", "+faststart",
             "-c:a", "aac", "-b:a", "128k", "-ar", "44100",
@@ -899,9 +904,10 @@ try:
 
         st.divider()
         st.subheader("Render")
-        n_scenes = st.slider("Jumlah scene", 3, 6, 5)
+        n_scenes = st.slider("Jumlah scene", 3, 6, 4)
         transitions = st.toggle("Transisi fade halus antar scene", value=True)
         add_grain = st.toggle("Film grain tipis (anti-plastik)", value=True)
+        st.caption("Free-tier hosting: makin banyak scene, makin lama & makin berat render-nya. Mulai dari 3-4 scene dulu buat tes.")
 
     st.markdown('<div class="kc-step">Langkah 1 · Produk affiliate</div>', unsafe_allow_html=True)
 
