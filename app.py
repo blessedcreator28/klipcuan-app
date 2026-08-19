@@ -734,6 +734,19 @@ try:
     # 6. PIPELINE
     # ──────────────────────────────────────────────────────────────────────────────
 
+    @st.cache_resource(show_spinner=False)
+    def _ffmpeg_supports_ass() -> tuple[bool, str]:
+        """Cek dukungan libass. SENGAJA lazy (dipanggil dari produce(), bukan di halaman
+        awal) — subprocess FFmpeg yang jalan sebelum app selesai boot bisa bikin
+        health-check Streamlit Cloud timeout dan keluar 'Oh no.' platform-level."""
+        try:
+            out = subprocess.run([FFMPEG_BIN, "-hide_banner", "-filters"],
+                                 capture_output=True, text=True, timeout=20)
+            ok = " ass " in out.stdout or "\nass" in out.stdout
+            return ok, out.stdout[-500:] if not ok else ""
+        except Exception as e:
+            return False, str(e)
+
     def produce(
         photos: list[Image.Image],
         concept: str,
@@ -746,6 +759,15 @@ try:
         transitions: bool,
         progress,
     ) -> bytes:
+        ass_ok, ass_detail = _ffmpeg_supports_ass()
+        if not ass_ok:
+            raise RuntimeError(
+                "Binary FFmpeg dari imageio-ffmpeg di server ini tidak dikompilasi dengan "
+                "libass (dibutuhkan buat burn-in subtitle). Coba pin imageio-ffmpeg==0.4.9 "
+                "di requirements.txt, atau tambahkan `ffmpeg` lagi ke packages.txt.\n"
+                f"Detail: {ass_detail}"
+            )
+
         workdir = tempfile.mkdtemp(prefix="klipcuan_")
         try:
             n = len(narrations)
@@ -828,28 +850,11 @@ try:
         st.error(f"Binary FFmpeg tidak ditemukan di path `{FFMPEG_BIN}`. Coba `pip install --force-reinstall imageio-ffmpeg`.")
         st.stop()
 
+    # Cek dukungan libass SENGAJA tidak dijalankan di sini (halaman awal) — memanggil
+    # subprocess FFmpeg sebelum app selesai boot bisa bikin health-check Streamlit Cloud
+    # timeout dan malah keluar "Oh no." platform-level yang gak ada hubungannya sama kode
+    # kita. Cek ini dijalankan belakangan, lazy, pas user klik Generate Video (lihat produce()).
 
-    @st.cache_resource(show_spinner=False)
-    def _ffmpeg_supports_ass() -> tuple[bool, str]:
-        try:
-            out = subprocess.run([FFMPEG_BIN, "-hide_banner", "-filters"],
-                                 capture_output=True, text=True, timeout=15)
-            ok = " ass " in out.stdout or "\nass" in out.stdout
-            return ok, out.stdout[-500:] if not ok else ""
-        except Exception as e:
-            return False, str(e)
-
-
-    _ass_ok, _ass_detail = _ffmpeg_supports_ass()
-    if not _ass_ok:
-        st.error(
-            "Binary FFmpeg dari `imageio-ffmpeg` di server ini tidak dikompilasi dengan libass "
-            "(dibutuhkan buat burn-in subtitle). Fallback: tambahkan `ffmpeg` lagi ke `packages.txt`, "
-            "atau pin versi lain: `imageio-ffmpeg==0.4.9`."
-        )
-        if _ass_detail:
-            st.code(_ass_detail)
-        st.stop()
 
     ss = st.session_state
     ss.setdefault("hook_text", "")
